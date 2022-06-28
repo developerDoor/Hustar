@@ -1,0 +1,151 @@
+#include <U8g2lib.h>
+#include "DHT.h"
+#include <SoftPWM.h>
+
+SOFTPWM_DEFINE_CHANNEL(A3);
+
+U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0,/*reset=*/ U8X8_PIN_NONE);
+
+#define DHTPIN A1
+#define DHTTYPE DHT22
+#define PUMP 16
+#define SOILHUMI A6
+#define LAMP 17
+
+DHT dht(DHTPIN, DHTTYPE);
+
+uint32_t DataCaptureDelay = 2000;
+uint32_t DataCaptureDelay_SoilHumid = 3000;
+uint32_t DataCapture_ST = 0;
+uint32_t DataCapture_ST_SoilHumid = 0;
+uint32_t TimeCompare;
+uint32_t StartTime=0;
+uint32_t TimeSum;
+
+int Soilhumi = 0;
+int PWM_value;
+float Temp;
+float Humi;
+
+int pump_On_Off = 0;
+int LED_On_Off = 0;
+
+
+void setup() {
+  SoftPWM.begin(490);
+  Serial.begin(9600);
+  dht.begin();
+  u8g2.begin();
+  pinMode(SOILHUMI, INPUT);
+  pinMode(PUMP,OUTPUT);
+  pinMode(LAMP,OUTPUT);
+  TimeSum = 60000;
+  StartTime= millis();
+  
+  DataCapture_ST = millis();
+  DataCapture_ST_SoilHumid = millis();
+}
+
+void loop() {
+  if((millis() - DataCapture_ST) > DataCaptureDelay){
+    Humi = dht.readHumidity();
+    Temp = dht.readTemperature();
+
+    if(isnan(Humi) || isnan(Temp)) {
+      Serial.println(F("Failed to read from DHT sensor!"));
+      return;
+    }
+    OLEDdraw();
+    DataCapture_ST = millis();
+  }
+
+  if((millis() - DataCapture_ST_SoilHumid) > DataCaptureDelay_SoilHumid){
+    Soilhumi = map(analogRead(SOILHUMI),0,1023,100,0);
+    
+    if(isnan(Soilhumi)) {
+      Serial.println(F("Failed to read from Soil_Humid sensor!"));
+      return;
+    }
+    OLEDdraw();
+    DataCapture_ST_SoilHumid = millis();
+  }
+  //팬 동작
+  if(Temp >= 29){
+    PWM_value = 100;
+    SoftPWM.set(PWM_value);
+  }
+  else if(Temp > 20) {
+    PWM_value = 65;
+    SoftPWM.set(PWM_value);
+  }
+  else{
+    PWM_value = 0;
+    SoftPWM.set(PWM_value);
+  }
+  //펌프 동작
+  if(Soilhumi >= 60) {
+    digitalWrite(PUMP,LOW);
+    pump_On_Off = 0;
+  }
+  else if(Soilhumi > 30) {
+    digitalWrite(PUMP,HIGH);
+    pump_On_Off = 1;
+  }
+  else {
+    digitalWrite(PUMP,LOW);
+    pump_On_Off = 0;
+  }
+
+  //LED 동작
+  TimeCompare = (millis() - StartTime)/ TimeSum ;
+
+  if (TimeCompare % 2 == 0) {
+    digitalWrite(LAMP,LOW);
+    LED_On_Off = 0;
+  }
+  else if (TimeCompare % 2 == 1) {
+    digitalWrite(LAMP,HIGH);
+    LED_On_Off = 1;
+  }
+
+}
+
+void OLEDdraw(){
+  u8g2.clearBuffer();
+  
+  u8g2.setFont(u8g2_font_ncenB08_te);
+  
+  u8g2.drawStr(5,15,"Temp.");
+  u8g2.setCursor(85,15);
+  u8g2.print(Temp);
+  u8g2.drawStr(114,15,"\xb0");
+  u8g2.drawStr(119,15,"C");
+
+  u8g2.drawStr(5,26,"Humidity");
+  u8g2.setCursor(85,26); 
+  u8g2.print(Humi);
+  u8g2.drawStr(116,26,"%");
+
+  u8g2.drawStr(5,37,"SoilHumid");
+  u8g2.setCursor(85,37);
+  u8g2.print(Soilhumi);
+  u8g2.drawStr(116,37,"%");
+
+  u8g2.drawStr(5,48,"FAN");
+  u8g2.setCursor(32,48);
+  u8g2.print(PWM_value);
+
+  u8g2.drawStr(46,48,"PUMP");
+  if(pump_On_Off == 0) { u8g2.drawStr(84,48,"X"); } 
+  else if(pump_On_Off == 1) { u8g2.drawStr(84,48,"O"); }
+    
+  u8g2.drawStr(95,48,"LED");
+  if(LED_On_Off == 0) { u8g2.drawStr(120,48,"X"); } 
+  else if(LED_On_Off == 1) { u8g2.drawStr(120,48,"O"); }
+
+  u8g2.drawStr(5,59,"LED_Freq");
+  u8g2.drawStr(80,59,"2");
+  u8g2.drawStr(111,59,"s");
+
+  u8g2.sendBuffer();
+}
